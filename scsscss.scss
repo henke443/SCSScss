@@ -1,0 +1,212 @@
+@use 'sass:list';
+@use 'sass:map';
+@use 'sass:meta';
+@use 'sass:string';
+
+$prefix: 'scsscss' !default;
+
+/////////////////////////////////
+// Calculate brightness value
+/////////////////////////////////
+
+@function brightness($color) {
+	@return (red($color) + green($color) + blue($color)) / (255 * 3);
+}
+
+/////////////////////////////////
+// Calculate brightness ratio
+// to base color
+/////////////////////////////////
+
+@function brightness_ratio($base, $color) {
+	@return abs(brightness($base) - brightness($color));
+}
+
+/////////////////////////////////
+// Compare colors to higher contrast
+/////////////////////////////////
+
+@function contrast($base, $color1: white, $color2: black) {
+	@return if(
+		brightness_ratio($base, $color1) > brightness_ratio($base, $color2),
+		$color1,
+		$color2
+	);
+}
+
+/////////////////////////////////
+// Compare colors to lower contrast (inverting the former contrast function)
+/////////////////////////////////
+
+@function invert-contrast($base, $color1: white, $color2: black) {
+	@return if(
+		brightness_ratio($base, $color1) > brightness_ratio($base, $color2),
+		$color2,
+		$color1
+	);
+}
+
+@mixin define-color($name, $color) {
+	--#{$name}-h: #{hue($color)};
+	--#{$name}-l: #{lightness($color)};
+	--#{$name}-s: #{saturation($color)};
+	--#{$name}-a: #{alpha($color)};
+}
+
+@function mod-color($name, $h: 0deg, $s: 0%, $l: 0%, $a: 0) {
+	@return hsla(
+		calc(var(--#{$prefix}-#{$name}-h) + $h),
+		calc(var(--#{$prefix}-#{$name}-s) + $s),
+		calc(var(--#{$prefix}-#{$name}-l) + $l),
+		calc(var(--#{$prefix}-#{$name}-a) + $a)
+	);
+}
+
+@function mod-color-abs($name, $h: 0deg, $s: 0%, $l: 0%, $a: 0) {
+	$hue: if(type-of($h) != false, $h, var(--#{$prefix}-#{$name}-h));
+	$saturation: if(type-of($s) != false, $s, var(--#{$prefix}-#{$name}-s));
+	$lightness: if(type-of($l) != false, $l, var(--#{$prefix}-#{$name}-l));
+	$alpha: if(type-of($a) != false, $a, var(--#{$prefix}-#{$name}-a));
+
+	@return hsla($hue, $saturation, $lightness, $alpha);
+}
+
+// sets lightness to absolute value
+@function color-abs-l($name, $h: 0deg, $l: 0%) {
+	@return hsla(
+		calc(var(--#{$name}-h)),
+		calc(var(--#{$name}-s)),
+		calc($l),
+		calc(var(--#{$name}-a))
+	);
+}
+
+@mixin define-color-variation($name, $baseColor, $s: 0%, $l: 0%, $a: 0) {
+	--#{$name}: #{transparentize(saturate(lighten($baseColor, $l), $s), $a)};
+}
+
+@mixin auto-contrast-variations(
+	$forName,
+	$color,
+	$invert-contrast: false,
+	$n: 5
+) {
+	$baseContrast: if(
+		$invert-contrast,
+		invert-contrast(
+			$color,
+			hsla(hue($color), saturation($color), 99%, 1),
+			hsla(hue($color), saturation($color), 1%, 1)
+		),
+		contrast(
+			$color,
+			hsla(hue($color), saturation($color), 99%, 1),
+			hsla(hue($color), saturation($color), 1%, 1)
+		)
+	);
+
+	@include define-color(#{$forName}-contrast, $baseContrast);
+
+	--#{$forName}-contrast: #{$baseContrast};
+	//@include define-color-variation(#{$forName}, '-contrast', $baseColor);
+
+	@for $i from 1 through $n {
+		@include define-color-variation(
+			'#{$forName}-contrast-#{$i * 50}',
+			if(
+				lightness($baseContrast) < 50%,
+				lighten($baseContrast, 5% * $i),
+				darken($baseContrast, 5% * $i)
+			)
+		);
+	}
+}
+@mixin auto-color-variations(
+	$name,
+	$color,
+	$contrast: true,
+	$invert-contrast: false,
+	$skip: (0, 1000),
+	$n: 20
+) {
+	@include define-color($name, $color);
+	//@include define-color-variation(#{$name}, '', get-color($name: $name));
+	--#{$name}: #{$color};
+
+	@for $i from 1 through $n {
+		@if not list.index($skip, 500 - 50 * ($n/2) + $i * 50) {
+			@if $i == $n/2 {
+				@include define-color-variation('#{$name}-500', $color);
+			} @else {
+				@include define-color-variation(
+					'#{$name}-#{500 - 50 * ($n/2) + $i * 50}',
+					if(
+						$i < $n/2,
+						darken($color, (($n/2)-$i) * 5%),
+						lighten($color, ($i % (1 + $n/2)) * 5%)
+					)
+				);
+			}
+		}
+	}
+	@if $contrast == true {
+		@include auto-contrast-variations(
+			$forName: #{$name},
+			$color: $color,
+			$invert-contrast: $invert-contrast,
+			$n: 10
+		);
+	}
+}
+
+@function get($key) {
+	@return #{var(--#{$prefix}-#{$key})};
+}
+
+@mixin set($key, $value) {
+	--#{$prefix}-#{$key}: #{$value};
+}
+
+@mixin get-set($key1, $key2) {
+	--#{$prefix}-#{$key1}: #{var(--#{$prefix}-#{$key2})};
+}
+
+@function str-ends-with($string, $find) {
+	@return str-length($string) >= str-length($find) AND
+		str-slice($string, (str-length($string) - str-length($find) + 1)) == $find;
+}
+
+/*
+Recommended:
+	$prefix: 'scsscss',
+	$primary: hsl(195, 100%, 46%),
+	$invert-primary-contrast: false,
+	$secondary: hsl(164, 64%, 50%),
+	$secondary-fade: hsl(181, 100%, 35%),
+	$background: hsl(0, 0%, 100%),
+	$accent: hsl(330, 100%, 63%),
+	$production: hsl(45, 100%, 56%),
+	$surface: hsl(0, 0%, 100%),
+	$error: hsl(0, 100%, 50%),
+	$warning: hsl(15, 100%, 64%),
+	$info: hsl(210, 100%, 50%),
+	$success: hsl(88, 100%, 37%)
+*/
+@mixin init($args...) {
+	:root {
+		@each $name, $value in keywords($args) {
+			@if (type-of($value) == color) {
+				@include auto-color-variations(
+					$name: #{$prefix}-#{$name},
+					$color: $value,
+					$contrast: true,
+					$invert-contrast: map.get(keywords($args), 'invert-#{$name}-contrast')
+				);
+			} @else {
+				// if it's not a color just set it as a simple prefixed variable.
+				--#{$prefix}-#{$name}: #{$value};
+			}
+		}
+		--scsscss-prefix: #{$prefix};
+	}
+}
